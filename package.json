@@ -1,0 +1,24 @@
+{
+  "name": "interested-list",
+  "version": "1.0.0",
+  "description": "Sequence Minds CRM sync layer — HubSpot ↔ Notion with Smartlead webhook",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "sync": "node -e \"require('dotenv').config(); const {syncHubSpotToNotion} = require('./src/sync'); syncHubSpotToNotion(200).then(console.log)\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:40743/git/itimch/interested-list"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@notionhq/client": "^5.22.0",
+    "axios": "^1.17.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1"
+  }
+}

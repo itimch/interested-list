@@ -1,0 +1,111 @@
+const { Client } = require('@notionhq/client');
+
+const notion = new Client({ auth: process.env.NOTION_TOKEN });
+const LEADS_DB = process.env.NOTION_LEADS_DB;
+const TASKS_DB = process.env.NOTION_TASKS_DB;
+
+async function findLeadByHubSpotId(hubspotId) {
+  const res = await notion.databases.query({
+    database_id: LEADS_DB,
+    filter: {
+      property: 'HubSpot ID',
+      rich_text: { equals: String(hubspotId) },
+    },
+  });
+  return res.results[0] || null;
+}
+
+async function findLeadByEmail(email) {
+  const res = await notion.databases.query({
+    database_id: LEADS_DB,
+    filter: { property: 'Email', email: { equals: email } },
+  });
+  return res.results[0] || null;
+}
+
+async function upsertLead(data) {
+  const {
+    hubspotId, name, company, email,
+    status, source, lastContacted, nextFollowUp,
+  } = data;
+
+  const properties = {
+    Name: { title: [{ text: { content: name || email } }] },
+    Email: { email },
+    'HubSpot ID': { rich_text: [{ text: { content: String(hubspotId) } }] },
+    Status: { select: { name: status } },
+    Source: { select: { name: source || 'HubSpot' } },
+  };
+
+  if (company) properties.Company = { rich_text: [{ text: { content: company } }] };
+  if (lastContacted) properties['Last Contacted'] = { date: { start: lastContacted.slice(0, 10) } };
+  if (nextFollowUp) properties['Next Follow-Up'] = { date: { start: nextFollowUp.slice(0, 10) } };
+
+  const existing = await findLeadByHubSpotId(hubspotId);
+
+  if (existing) {
+    await notion.pages.update({ page_id: existing.id, properties });
+    return { action: 'updated', id: existing.id };
+  } else {
+    const page = await notion.pages.create({
+      parent: { database_id: LEADS_DB },
+      properties,
+    });
+    return { action: 'created', id: page.id };
+  }
+}
+
+async function createTask(data) {
+  const { task, dueDate, priority, type, notes, leadPageId } = data;
+
+  const properties = {
+    Task: { title: [{ text: { content: task } }] },
+    Priority: { select: { name: priority || 'This Week' } },
+    Done: { checkbox: false },
+  };
+
+  if (type) properties.Type = { select: { name: type } };
+  if (notes) properties.Notes = { rich_text: [{ text: { content: notes } }] };
+  if (dueDate) properties['Due Date'] = { date: { start: dueDate } };
+  if (leadPageId) properties.Lead = { relation: [{ id: leadPageId }] };
+
+  return notion.pages.create({ parent: { database_id: TASKS_DB }, properties });
+}
+
+async function getOverdueTasks() {
+  const today = new Date().toISOString().slice(0, 10);
+  const res = await notion.databases.query({
+    database_id: TASKS_DB,
+    filter: {
+      and: [
+        { property: 'Done', checkbox: { equals: false } },
+        { property: 'Due Date', date: { on_or_before: today } },
+      ],
+    },
+    sorts: [{ property: 'Due Date', direction: 'ascending' }],
+  });
+  return res.results;
+}
+
+async function getLeadsDueForFollowUp() {
+  const today = new Date().toISOString().slice(0, 10);
+  const res = await notion.databases.query({
+    database_id: LEADS_DB,
+    filter: {
+      and: [
+        { property: 'Next Follow-Up', date: { on_or_before: today } },
+        {
+          or: [
+            { property: 'Status', select: { equals: 'Replied' } },
+            { property: 'Status', select: { equals: 'Interested' } },
+            { property: 'Status', select: { equals: 'Meeting Booked' } },
+          ],
+        },
+      ],
+    },
+    sorts: [{ property: 'Next Follow-Up', direction: 'ascending' }],
+  });
+  return res.results;
+}
+
+module.exports = { upsertLead, createTask, findLeadByEmail, findLeadByHubSpotId, getOverdueTasks, getLeadsDueForFollowUp };
