@@ -4,6 +4,7 @@ const cron = require('node-cron');
 const { syncHubSpotToNotion } = require('./sync');
 const { handleSmartleadWebhook, verifySmartleadSignature } = require('./smartlead');
 const { getOverdueTasks, getLeadsDueForFollowUp } = require('./notion');
+const { handleInboundEmail } = require('./gmail');
 
 const app = express();
 app.use(express.json());
@@ -66,6 +67,20 @@ app.get('/digest', async (req, res) => {
     res.json(digest);
   } catch (err) {
     console.error('[/digest]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Gmail inbound webhook ─────────────────────────────────────────────────────
+// Call this from an external Gmail watcher (e.g. Google Apps Script, Zapier,
+// or the Claude MCP poller) when a lead replies to your email.
+app.post('/webhooks/gmail', async (req, res) => {
+  const { fromEmail, fromName, subject, snippet, date } = req.body;
+  try {
+    const result = await handleInboundEmail({ fromEmail, fromName, subject, snippet, date });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[/webhooks/gmail]', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
