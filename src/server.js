@@ -5,6 +5,7 @@ const { syncHubSpotToNotion } = require('./sync');
 const { handleSmartleadWebhook, verifySmartleadSignature } = require('./smartlead');
 const { getOverdueTasks, getLeadsDueForFollowUp } = require('./notion');
 const { handleInboundEmail } = require('./gmail');
+const { handleCalendlyWebhook } = require('./calendly');
 
 const app = express();
 app.use(express.json());
@@ -67,6 +68,19 @@ app.get('/digest', async (req, res) => {
     res.json(digest);
   } catch (err) {
     console.error('[/digest]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── Calendly webhook ──────────────────────────────────────────────────────────
+// In Calendly: Settings -> Integrations -> Webhooks -> add this URL
+// Events: invitee.created, invitee.canceled
+app.post('/webhooks/calendly', async (req, res) => {
+  try {
+    const result = await handleCalendlyWebhook(req.body);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[/webhooks/calendly]', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
