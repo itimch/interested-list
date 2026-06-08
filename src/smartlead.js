@@ -10,7 +10,14 @@ function verifySmartleadSignature(req, secret) {
 }
 
 async function handleSmartleadWebhook(event) {
-  const { event_type, lead_email, lead_name, campaign_name, reply_text } = event;
+  console.log('[smartlead] Raw payload:', JSON.stringify(event));
+
+  // Accept field names from both Smartlead native and Clay HTTP action
+  const event_type = event.event_type || event.event || event.type || event.event_name;
+  const lead_email = event.lead_email || event.email || event.from_email;
+  const lead_name = event.lead_name || event.name || event.from_name;
+  const campaign_name = event.campaign_name || event.campaign;
+  const reply_text = event.reply_text || event.body || event.snippet || event.message;
 
   console.log(`[smartlead] Event: ${event_type} from ${lead_email}`);
 
