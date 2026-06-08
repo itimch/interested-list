@@ -5,7 +5,7 @@ const { syncHubSpotToNotion } = require('./sync');
 const { handleSmartleadWebhook, verifySmartleadSignature } = require('./smartlead');
 const { getOverdueTasks, getLeadsDueForFollowUp } = require('./notion');
 const { handleInboundEmail } = require('./gmail');
-const { handleCalendlyWebhook } = require('./calendly');
+const { syncGoogleCalendarToNotion } = require('./gcal');
 
 const app = express();
 app.use(express.json());
@@ -72,15 +72,16 @@ app.get('/digest', async (req, res) => {
   }
 });
 
-// ── Calendly webhook ──────────────────────────────────────────────────────────
-// In Calendly: Settings -> Integrations -> Webhooks -> add this URL
-// Events: invitee.created, invitee.canceled
-app.post('/webhooks/calendly', async (req, res) => {
+// ── Google Calendar manual sync ───────────────────────────────────────────────
+app.post('/sync/gcal', async (req, res) => {
   try {
-    const result = await handleCalendlyWebhook(req.body);
-    res.json({ ok: true, ...result });
+    const summary = await syncGoogleCalendarToNotion(
+      req.body.lookbackDays || 7,
+      req.body.forwardDays || 30
+    );
+    res.json({ ok: true, ...summary });
   } catch (err) {
-    console.error('[/webhooks/calendly]', err.message);
+    console.error('[/sync/gcal]', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -107,6 +108,16 @@ cron.schedule(`*/${intervalMinutes} * * * *`, async () => {
     await syncHubSpotToNotion(200);
   } catch (err) {
     console.error('[cron] Sync failed:', err.message);
+  }
+});
+
+// Google Calendar sync every 4 hours
+cron.schedule('0 */4 * * *', async () => {
+  console.log('[cron] Syncing Google Calendar -> Notion');
+  try {
+    await syncGoogleCalendarToNotion(1, 30);
+  } catch (err) {
+    console.error('[cron] GCal sync failed:', err.message);
   }
 });
 
