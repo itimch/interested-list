@@ -1,4 +1,5 @@
 const { google } = require('googleapis');
+const axios = require('axios');
 const { upsertLead, createTask, findLeadByEmail } = require('./notion');
 const { Client } = require('@notionhq/client');
 
@@ -17,6 +18,56 @@ function buildGoogleAuth() {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: process.env.GOOGLE_ACCESS_TOKEN });
   return auth;
+}
+
+function extractCompanyFromEmail(email) {
+  const domain = email.split('@')[1] || '';
+  return domain.replace(/\.(com|org|net|io|ai|co)$/, '').replace(/\./g, ' ');
+}
+
+/**
+ * Call Clay API to enrich a person + company by email domain.
+ * Returns { title, companyName, companySize, linkedinUrl, summary } or null.
+ */
+async function enrichWithClay(email, name) {
+  const CLAY_API_KEY = process.env.CLAY_API_KEY;
+  if (!CLAY_API_KEY) return null;
+
+  const domain = email.split('@')[1];
+  try {
+    // Clay enrichment endpoint — enrich person by email
+    const resp = await axios.post(
+      'https://api.clay.com/v1/sources/person-search/run',
+      { email, domain },
+      {
+        headers: {
+          Authorization: `Bearer ${CLAY_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 8000,
+      }
+    );
+
+    const person = resp.data?.data?.[0];
+    if (!person) return null;
+
+    return {
+      title: person.title || person.job_title || '',
+      companyName: person.company_name || extractCompanyFromEmail(email),
+      companySize: person.company_size || '',
+      linkedinUrl: person.linkedin_url || '',
+      summary: [
+        person.title && `${person.title} at ${person.company_name}`,
+        person.company_size && `Company size: ${person.company_size}`,
+        person.company_description,
+      ]
+        .filter(Boolean)
+        .join(' | '),
+    };
+  } catch (err) {
+    console.warn(`[gcal] Clay enrichment failed for ${email}:`, err.message);
+    return null;
+  }
 }
 
 /**
@@ -57,7 +108,6 @@ async function syncGoogleCalendarToNotion(lookbackDays = 7, forwardDays = 30) {
     for (const attendee of externalAttendees) {
       const email = attendee.email;
       const name = attendee.displayName || email.split('@')[0];
-      const company = extractCompanyFromEmail(email);
 
       try {
         const existing = await findLeadByEmail(email);
@@ -76,6 +126,10 @@ async function syncGoogleCalendarToNotion(lookbackDays = 7, forwardDays = 30) {
           });
           updated++;
         } else {
+          // Enrich person/company via Clay before creating the Notion record
+          const enriched = await enrichWithClay(email, name);
+          const company = enriched?.companyName || extractCompanyFromEmail(email);
+
           await upsertLead({
             hubspotId: '',
             name,
@@ -84,6 +138,9 @@ async function syncGoogleCalendarToNotion(lookbackDays = 7, forwardDays = 30) {
             status: 'Meeting Booked',
             source: 'Gmail',
             lastContacted: startTime,
+            aiSummary: enriched?.summary
+              ? `${enriched.summary} | Meeting: "${summary}" on ${startTime.slice(0, 10)}`
+              : `Meeting: "${summary}" on ${startTime.slice(0, 10)}`,
           });
           created++;
 
@@ -97,7 +154,9 @@ async function syncGoogleCalendarToNotion(lookbackDays = 7, forwardDays = 30) {
               dueDate: followUpDate.toISOString().slice(0, 10),
               priority: 'Today',
               type: 'Follow-Up Email',
-              notes: `Meeting on ${startTime.slice(0, 10)}`,
+              notes: enriched?.summary
+                ? `Meeting on ${startTime.slice(0, 10)} | ${enriched.summary}`
+                : `Meeting on ${startTime.slice(0, 10)}`,
               leadPageId: lead.id,
             });
           }
@@ -108,14 +167,9 @@ async function syncGoogleCalendarToNotion(lookbackDays = 7, forwardDays = 30) {
     }
   }
 
-  const summary = { events: events.length, created, updated };
-  console.log('[gcal] Sync done:', summary);
-  return summary;
-}
-
-function extractCompanyFromEmail(email) {
-  const domain = email.split('@')[1] || '';
-  return domain.replace(/\.(com|org|net|io|ai|co)$/, '').replace(/\./g, ' ');
+  const result = { events: events.length, created, updated };
+  console.log('[gcal] Sync done:', result);
+  return result;
 }
 
 module.exports = { syncGoogleCalendarToNotion };
