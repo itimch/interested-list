@@ -6,6 +6,7 @@ const { handleSmartleadWebhook, verifySmartleadSignature } = require('./smartlea
 const { getOverdueTasks, getLeadsDueForFollowUp } = require('./notion');
 const { handleInboundEmail } = require('./gmail');
 const { syncGoogleCalendarToNotion } = require('./gcal');
+const { syncFathomToNotion } = require('./fathom');
 
 const app = express();
 app.use(express.json());
@@ -108,6 +109,27 @@ cron.schedule(`*/${intervalMinutes} * * * *`, async () => {
     await syncHubSpotToNotion(200);
   } catch (err) {
     console.error('[cron] Sync failed:', err.message);
+  }
+});
+
+// Fathom sync every 4 hours — update leads with meeting summaries
+cron.schedule('30 */4 * * *', async () => {
+  console.log('[cron] Syncing Fathom -> Notion');
+  try {
+    await syncFathomToNotion(1);
+  } catch (err) {
+    console.error('[cron] Fathom sync failed:', err.message);
+  }
+});
+
+// Manual Fathom sync trigger
+app.post('/sync/fathom', async (req, res) => {
+  try {
+    const summary = await syncFathomToNotion(req.body.lookbackDays || 7);
+    res.json({ ok: true, ...summary });
+  } catch (err) {
+    console.error('[/sync/fathom]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
