@@ -4,30 +4,23 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const LEADS_DB = process.env.NOTION_LEADS_DB;
 const TASKS_DB = process.env.NOTION_TASKS_DB;
 
-// v5 of @notionhq/client moved database querying to dataSources.query
-async function queryDatabase(database_id, filter, sorts) {
-  const res = await notion.dataSources.query({
-    data_source_id: database_id,
-    ...(filter && { filter }),
-    ...(sorts && { sorts }),
-  });
-  return res.results || [];
-}
-
 async function findLeadByHubSpotId(hubspotId) {
-  const results = await queryDatabase(LEADS_DB, {
-    property: 'HubSpot ID',
-    rich_text: { equals: String(hubspotId) },
+  const res = await notion.databases.query({
+    database_id: LEADS_DB,
+    filter: {
+      property: 'HubSpot ID',
+      rich_text: { equals: String(hubspotId) },
+    },
   });
-  return results[0] || null;
+  return res.results[0] || null;
 }
 
 async function findLeadByEmail(email) {
-  const results = await queryDatabase(LEADS_DB, {
-    property: 'Email',
-    email: { equals: email },
+  const res = await notion.databases.query({
+    database_id: LEADS_DB,
+    filter: { property: 'Email', email: { equals: email } },
   });
-  return results[0] || null;
+  return res.results[0] || null;
 }
 
 async function upsertLead(data) {
@@ -82,23 +75,24 @@ async function createTask(data) {
 
 async function getOverdueTasks() {
   const today = new Date().toISOString().slice(0, 10);
-  return queryDatabase(
-    TASKS_DB,
-    {
+  const res = await notion.databases.query({
+    database_id: TASKS_DB,
+    filter: {
       and: [
         { property: 'Done', checkbox: { equals: false } },
         { property: 'Due Date', date: { on_or_before: today } },
       ],
     },
-    [{ property: 'Due Date', direction: 'ascending' }]
-  );
+    sorts: [{ property: 'Due Date', direction: 'ascending' }],
+  });
+  return res.results;
 }
 
 async function getLeadsDueForFollowUp() {
   const today = new Date().toISOString().slice(0, 10);
-  return queryDatabase(
-    LEADS_DB,
-    {
+  const res = await notion.databases.query({
+    database_id: LEADS_DB,
+    filter: {
       and: [
         { property: 'Next Follow-Up', date: { on_or_before: today } },
         {
@@ -110,8 +104,9 @@ async function getLeadsDueForFollowUp() {
         },
       ],
     },
-    [{ property: 'Next Follow-Up', direction: 'ascending' }]
-  );
+    sorts: [{ property: 'Next Follow-Up', direction: 'ascending' }],
+  });
+  return res.results;
 }
 
 module.exports = { upsertLead, createTask, findLeadByEmail, findLeadByHubSpotId, getOverdueTasks, getLeadsDueForFollowUp };
