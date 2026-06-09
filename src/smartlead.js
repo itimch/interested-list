@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { upsertLead, createTask, findLeadByEmail } = require('./notion');
+const { enrichLead, writeEnrichmentToNotion } = require('./enrich');
 
 function verifySmartleadSignature(req, secret) {
   const signature = req.headers['x-smartlead-signature'];
@@ -61,6 +62,16 @@ async function handleSmartleadWebhook(event) {
       notes: reply_text ? `They said: "${reply_text.slice(0, 300)}"` : '',
       leadPageId,
     });
+
+    // Enrich in background — don't await so webhook responds instantly
+    const nameParts = (lead_name || '').trim().split(/\s+/);
+    const firstName = nameParts[0] || undefined;
+    const lastName = nameParts.slice(1).join(' ') || undefined;
+    const companyFromEvent = event.company || event.lead_company || undefined;
+
+    enrichLead({ email: lead_email, firstName, lastName, company: companyFromEvent })
+      .then(enrichment => writeEnrichmentToNotion(leadPageId, enrichment))
+      .catch(err => console.error('[enrich] background enrichment failed:', err.message));
 
     return { handled: true, action: 'reply_logged' };
   }
